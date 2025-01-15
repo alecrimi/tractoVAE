@@ -39,10 +39,20 @@ tensor_data[..., 1, 1] = eigvals[..., 1]  # Lambda 2 (middle eigenvalue)
 tensor_data[..., 2, 2] = eigvals[..., 0]  # Lambda 3 (smallest eigenvalue)
 
 # Step 4: Fit the tensor model using Dipy's TensorModel
-# Create a fake gradient table (assuming two gradient directions for simplicity)
-bvals = [0, 1000]  # Replace with actual b-values if available
-bvecs = np.array([[1, 0, 0], [0, 1, 0]])  # Replace with actual b-vectors if available
-gtab = gradient_table(bvals=bvals, bvecs=bvecs)
+# Create a valid gradient table
+bvals = np.array([0, 1000])  # Two b-values (e.g., b=0 and b=1000 s/mm^2)
+bvecs = np.array([
+    [1, 0, 0],  # Gradient direction for b=1000
+    [0, 1, 0]   # Gradient direction for b=1000
+])  # Two gradient directions (3D vectors)
+
+# Ensure the bvecs array is normalized (each row is a unit vector)
+bvecs = bvecs / np.linalg.norm(bvecs, axis=1, keepdims=True)
+
+# Now create the gradient table
+gtab = gradient_table(bvals, bvecs)
+
+# Fit the tensor model
 model = TensorModel(gtab)
 fit = model.fit(tensor_data)
 
