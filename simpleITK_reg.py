@@ -19,7 +19,7 @@ registration = sitk.ImageRegistrationMethod()
 #registration.SetMetricAsCorrelation()  
 registration.SetMetricAsMattesMutualInformation(numberOfHistogramBins=200)
 # Simpler metric for similar images
-registration.SetOptimizerAsGradientDescent(learningRate=0.1, numberOfIterations=500)
+registration.SetOptimizerAsGradientDescent(learningRate=0.01, numberOfIterations=1000)
 registration.SetInterpolator(sitk.sitkLinear)
 #set lr=1 iter more than 500, and correlation
 
@@ -33,8 +33,8 @@ initial_transform = sitk.CenteredTransformInitializer(
 registration.SetInitialTransform(initial_transform, inPlace=False)
 
 # Multi-resolution strategy
-registration.SetShrinkFactorsPerLevel([16,8, 4, 2, 1])
-registration.SetSmoothingSigmasPerLevel([4,3, 2, 1, 0])
+registration.SetShrinkFactorsPerLevel([8, 4, 2, 1])
+registration.SetSmoothingSigmasPerLevel([3, 2, 1, 0])
 registration.SmoothingSigmasAreSpecifiedInPhysicalUnitsOn()
 
 # List to store aligned images
@@ -42,7 +42,7 @@ aligned_images = [fixed_image]  # Start with the fixed image
 
 # Process each image in the stack (starting from the second image)
 for i in range(1, len(images)):
-#for i in range(4, 5):
+#for i in range(1, 5):
     print(f"Registering image {i+1}/{len(images)}...")
 
     # Moving image
