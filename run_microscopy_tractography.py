@@ -27,45 +27,65 @@ for z in range(image_stack.shape[0]):
             ])
             eigvals[z, y, x] = np.linalg.eigh(tensor)[0]
 
-# Step 3: Create a diffusion tensor from the eigenvalues
-# Reshape the tensor data to match expected dimensions (x, y, z, 6)
-# We'll use the six unique elements of the symmetric 3x3 tensor
-tensor_data = np.zeros(image_stack.shape + (6,))
-tensor_data[..., 0] = eigvals[..., 2]  # Dxx
-tensor_data[..., 1] = eigvals[..., 1]  # Dyy
-tensor_data[..., 2] = eigvals[..., 0]  # Dzz
-tensor_data[..., 3] = np.zeros_like(eigvals[..., 0])  # Dxy
-tensor_data[..., 4] = np.zeros_like(eigvals[..., 0])  # Dxz
-tensor_data[..., 5] = np.zeros_like(eigvals[..., 0])  # Dyz
+# Step 3: Create synthetic diffusion data
+# Create more gradient directions for better estimation
+bvecs = np.array([
+    [0, 0, 0],
+    [1, 0, 0], [-1, 0, 0],
+    [0, 1, 0], [0, -1, 0],
+    [0, 0, 1], [0, 0, -1],
+    [1, 1, 0], [-1, -1, 0],
+    [1, 0, 1], [-1, 0, -1],
+    [0, 1, 1], [0, -1, -1]
+])
+bvecs = bvecs / np.linalg.norm(bvecs, axis=1, keepdims=True)
+bvecs[0] = [0, 0, 0]  # Ensure b0 direction is exactly zero
 
-# Step 4: Create gradient table and fit tensor model
-bvals = np.array([0, 1000, 1000])
-bvecs = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]])
+# Create corresponding b-values (b=0 for first direction, b=1000 for others)
+bvals = np.zeros(len(bvecs))
+bvals[1:] = 1000
+
+# Create the gradient table
 gtab = gradient_table(bvals, bvecs)
+
+# Create synthetic diffusion weighted images
+data = np.zeros(image_stack.shape + (len(bvals),))
+for z in range(image_stack.shape[0]):
+    for y in range(image_stack.shape[1]):
+        for x in range(image_stack.shape[2]):
+            # Create diffusion tensor from eigenvalues
+            D = np.diag(eigvals[z, y, x])
+            # Calculate signal for each gradient direction
+            for i in range(len(bvals)):
+                if i == 0:  # b0 image
+                    data[z, y, x, i] = image_stack[z, y, x]
+                else:
+                    # S = S0 * exp(-b * g^T * D * g)
+                    g = bvecs[i]
+                    S = image_stack[z, y, x] * np.exp(-bvals[i] * g.dot(D).dot(g))
+                    data[z, y, x, i] = S
 
 # Fit the tensor model
 model = TensorModel(gtab)
-fit = model.fit(tensor_data)
+fit = model.fit(data)
 
 # Get FA and ensure it's 3D
 FA = fit.fa
-if FA.ndim > 3:
-    FA = np.squeeze(FA)  # Remove any singleton dimensions
 
-# Step 5: Create stopping criterion
+# Create stopping criterion
 stopping_criterion = BinaryStoppingCriterion(FA > 0.2)
 
-# Step 6: Generate peaks
+# Generate peaks
 sphere = default_sphere
-peaks = peaks_from_model(model, image_stack, sphere, relative_peak_threshold=0.5)
+peaks = peaks_from_model(model, data[..., 0], sphere, relative_peak_threshold=0.5)
 
-# Step 7: Generate streamlines
+# Generate streamlines
 seed_mask = FA > 0.2
 seeds = np.argwhere(seed_mask)
 streamlines_generator = LocalTracking(peaks, stopping_criterion, seeds, np.eye(4), step_size=0.5)
 streamlines = Streamlines(streamlines_generator)
 
-# Step 8: Save the streamlines
+# Save the streamlines
 header = {
     'voxel_sizes': (1.0, 1.0, 1.0),
     'voxel_order': 'LPS',
