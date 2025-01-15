@@ -10,74 +10,66 @@ from dipy.direction import peaks_from_model
 from dipy.io.streamline import save_trk
 
 # Load your microscopy image stack (3D volume)
-# Assuming the stack is loaded as a numpy array (Z x Y x X)
 image_stack = io.imread('scaled_registered_stack_bins200_rate0.1_i500.tif')
 
 # Step 1: Compute the structure tensor of the image stack
-# Using a 3D Gaussian sigma for a stack (change sigma depending on image resolution)
 Axx, Axy, Axz, Ayy, Ayz, Azz = structure_tensor(image_stack, sigma=1)
 
 # Step 2: Compute the eigenvalues of the structure tensor for each voxel
-eigvals = np.zeros(image_stack.shape + (3,))  # Store 3 eigenvalues per voxel
-
+eigvals = np.zeros(image_stack.shape + (3,))
 for z in range(image_stack.shape[0]):
     for y in range(image_stack.shape[1]):
         for x in range(image_stack.shape[2]):
-            # Construct the 3x3 structure tensor at voxel (z, y, x)
             tensor = np.array([
                 [Axx[z, y, x], Axy[z, y, x], Axz[z, y, x]],
                 [Axy[z, y, x], Ayy[z, y, x], Ayz[z, y, x]],
                 [Axz[z, y, x], Ayz[z, y, x], Azz[z, y, x]],
             ])
-            # Compute eigenvalues of the tensor and store them
-            eigvals[z, y, x] = np.linalg.eigh(tensor)[0]  # Sorted eigenvalues
+            eigvals[z, y, x] = np.linalg.eigh(tensor)[0]
 
 # Step 3: Create a diffusion tensor from the eigenvalues
-tensor_data = np.zeros(image_stack.shape + (3, 3))
-tensor_data[..., 0, 0] = eigvals[..., 2]  # Lambda 1 (largest eigenvalue)
-tensor_data[..., 1, 1] = eigvals[..., 1]  # Lambda 2 (middle eigenvalue)
-tensor_data[..., 2, 2] = eigvals[..., 0]  # Lambda 3 (smallest eigenvalue)
+# Reshape the tensor data to match expected dimensions (x, y, z, 6)
+# We'll use the six unique elements of the symmetric 3x3 tensor
+tensor_data = np.zeros(image_stack.shape + (6,))
+tensor_data[..., 0] = eigvals[..., 2]  # Dxx
+tensor_data[..., 1] = eigvals[..., 1]  # Dyy
+tensor_data[..., 2] = eigvals[..., 0]  # Dzz
+tensor_data[..., 3] = np.zeros_like(eigvals[..., 0])  # Dxy
+tensor_data[..., 4] = np.zeros_like(eigvals[..., 0])  # Dxz
+tensor_data[..., 5] = np.zeros_like(eigvals[..., 0])  # Dyz
 
-# Step 4: Fit the tensor model using Dipy's TensorModel
-# Create a valid gradient table
-bvals = np.array([0, 1000])  # Two b-values (e.g., b=0 and b=1000 s/mm^2)
-bvecs = np.array([
-    [1, 0, 0],  # Gradient direction for b=1000
-    [0, 1, 0]   # Gradient direction for b=1000
-])  # Two gradient directions (3D vectors)
-
-# Ensure the bvecs array is normalized (each row is a unit vector)
-bvecs = bvecs / np.linalg.norm(bvecs, axis=1, keepdims=True)
-
-# Now create the gradient table
+# Step 4: Create gradient table and fit tensor model
+bvals = np.array([0, 1000, 1000])
+bvecs = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]])
 gtab = gradient_table(bvals, bvecs)
 
 # Fit the tensor model
 model = TensorModel(gtab)
 fit = model.fit(tensor_data)
 
-# Step 5: Create a stopping criterion for tractography (using FA > threshold)
-FA = fit.fa  # Fractional Anisotropy map
+# Get FA and ensure it's 3D
+FA = fit.fa
+if FA.ndim > 3:
+    FA = np.squeeze(FA)  # Remove any singleton dimensions
+
+# Step 5: Create stopping criterion
 stopping_criterion = BinaryStoppingCriterion(FA > 0.2)
 
-# Step 6: Use the peak directions for local tracking
-sphere = default_sphere  # Define directions used for tracking
+# Step 6: Generate peaks
+sphere = default_sphere
 peaks = peaks_from_model(model, image_stack, sphere, relative_peak_threshold=0.5)
 
-# Step 7: Generate streamlines (seed points based on FA threshold)
+# Step 7: Generate streamlines
 seed_mask = FA > 0.2
-seeds = np.argwhere(seed_mask)  # Generate seed points in voxel space
-
-# Perform local tracking
+seeds = np.argwhere(seed_mask)
 streamlines_generator = LocalTracking(peaks, stopping_criterion, seeds, np.eye(4), step_size=0.5)
 streamlines = Streamlines(streamlines_generator)
 
-# Step 8: Save the streamlines to a .trk file for TrackVis
+# Step 8: Save the streamlines
 header = {
-    'voxel_sizes': (1.0, 1.0, 1.0),  # Assume isotropic voxels (adjust if necessary)
-    'voxel_order': 'LPS',            # Left-Posterior-Superior, adjust as needed
-    'dim': image_stack.shape[:3],    # Dimensions of the stack
+    'voxel_sizes': (1.0, 1.0, 1.0),
+    'voxel_order': 'LPS',
+    'dim': image_stack.shape[:3],
 }
 save_trk("microscopy_tractography.trk", streamlines, np.eye(4), image_stack.shape[:3], header=header)
-
 print("Streamlines saved to 'microscopy_tractography.trk'")
