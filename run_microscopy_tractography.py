@@ -38,8 +38,11 @@ bvecs = np.array([
     [1, 0, 1], [-1, 0, -1],
     [0, 1, 1], [0, -1, -1]
 ])
-bvecs = bvecs / np.linalg.norm(bvecs, axis=1, keepdims=True)
-bvecs[0] = [0, 0, 0]  # Ensure b0 direction is exactly zero
+
+# Normalize non-zero vectors
+norms = np.linalg.norm(bvecs, axis=1)
+mask = norms > 0
+bvecs[mask] = bvecs[mask] / norms[mask, np.newaxis]
 
 # Create corresponding b-values (b=0 for first direction, b=1000 for others)
 bvals = np.zeros(len(bvecs))
@@ -77,7 +80,13 @@ stopping_criterion = BinaryStoppingCriterion(FA > 0.2)
 
 # Generate peaks
 sphere = default_sphere
-peaks = peaks_from_model(model, data[..., 0], sphere, relative_peak_threshold=0.5)
+peaks = peaks_from_model(
+    model=model,
+    data=data[..., 0],
+    sphere=sphere,
+    relative_peak_threshold=0.5,
+    min_separation_angle=25  # Added required parameter in degrees
+)
 
 # Generate streamlines
 seed_mask = FA > 0.2
