@@ -27,29 +27,42 @@ for z in range(image_stack.shape[0]):
             ])
             eigvals[z, y, x] = np.linalg.eigh(tensor)[0]
 
-# Step 3: Create synthetic diffusion data
-# Create more gradient directions for better estimation
+# Step 3: Create synthetic diffusion data with precise unit vectors
+# First vector is [0,0,0] for b0, others are unit vectors
 bvecs = np.array([
-    [0, 0, 0],
-    [1, 0, 0], [-1, 0, 0],
-    [0, 1, 0], [0, -1, 0],
-    [0, 0, 1], [0, 0, -1],
-    [1, 1, 0], [-1, -1, 0],
-    [1, 0, 1], [-1, 0, -1],
-    [0, 1, 1], [0, -1, -1]
-])
+    [0., 0., 0.],
+    [1., 0., 0.],
+    [-1., 0., 0.],
+    [0., 1., 0.],
+    [0., -1., 0.],
+    [0., 0., 1.],
+    [0., 0., -1.],
+    [1., 1., 0.],
+    [-1., -1., 0.],
+    [1., 0., 1.],
+    [-1., 0., -1.],
+    [0., 1., 1.],
+    [0., -1., -1.]
+], dtype=np.float64)
 
-# Normalize non-zero vectors
-norms = np.linalg.norm(bvecs, axis=1)
-mask = norms > 0
-bvecs[mask] = bvecs[mask] / norms[mask, np.newaxis]
+# Precisely normalize non-zero vectors
+for i in range(1, len(bvecs)):  # Skip first vector (b0)
+    norm = np.sqrt(np.sum(bvecs[i] ** 2))
+    if norm > 0:
+        bvecs[i] = bvecs[i] / norm
 
-# Create corresponding b-values (b=0 for first direction, b=1000 for others)
-bvals = np.zeros(len(bvecs))
-bvals[1:] = 1000
+# Verify that vectors are unit length (except b0)
+for i in range(1, len(bvecs)):
+    norm = np.sqrt(np.sum(bvecs[i] ** 2))
+    if not np.isclose(norm, 1.0, rtol=1e-7):
+        raise ValueError(f"Vector {i} is not unit length: {norm}")
+
+# Create corresponding b-values
+bvals = np.zeros(len(bvecs), dtype=np.float64)
+bvals[1:] = 1000.0  # Set non-b0 values to 1000
 
 # Create the gradient table
-gtab = gradient_table(bvals, bvecs)
+gtab = gradient_table(bvals, bvecs, b0_threshold=50)
 
 # Create synthetic diffusion weighted images
 data = np.zeros(image_stack.shape + (len(bvals),))
@@ -72,7 +85,7 @@ for z in range(image_stack.shape[0]):
 model = TensorModel(gtab)
 fit = model.fit(data)
 
-# Get FA and ensure it's 3D
+# Get FA
 FA = fit.fa
 
 # Create stopping criterion
@@ -85,7 +98,7 @@ peaks = peaks_from_model(
     data=data[..., 0],
     sphere=sphere,
     relative_peak_threshold=0.5,
-    min_separation_angle=25  # Added required parameter in degrees
+    min_separation_angle=25
 )
 
 # Generate streamlines
